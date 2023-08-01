@@ -49,11 +49,6 @@ String MQTTPower = MQTTGlobalPrefix + "/power";
 String MQTTStateTopic = MQTTGlobalPrefix + "/state";
 //// MQTT settings ////
 
-typedef struct {
-  uint8_t hours;
-  uint8_t minutes;
-} Alarm;
-
 // Display config
 #define HARDWARE_TYPE MD_MAX72XX::FC16_HW // type of device hardware https://majicdesigns.github.io/MD_MAX72XX/page_hardware.html
 //// Display pinout
@@ -77,9 +72,7 @@ ZoneData zones[] = {
   {6, 7, 35, 1, 3000, "PA_CENTER", "PA_SCROLL_DOWN", "PA_NO_EFFECT", "wledFont", "manualInput", "HHMM", "", "", "owmTemperature", ""},
 };
 
-Alarm alarms[10] = {
-    {17, 20
-    }};
+String alarms[10] = {"15:15", "15:17", "15:05", "15:07", "18:00"};
 
 uint8_t zoneNumbers = 1;
 uint8_t intensity   = 7;
@@ -747,10 +740,12 @@ void wifiApWelcomeMessage(AsyncWiFiManager *wifiManager) {
 }
 
 String getCurTime(String curZoneFont, String displayFormat) {
-      String t = (String)timeClient.getFormattedTime(); // returns HH:MM:SS
-      
+      String t = (String)timeClient.getFormattedTime();// returns HH:MM:SS
+      String time = "00:00";
+
       if (displayFormat == "HHMM") {
         t.remove(5,4);
+        time = t.substring(0, t.length() - 1);
       }
       if (displayFormat == "HH") {
         t.remove(2,7);
@@ -785,11 +780,18 @@ String getCurTime(String curZoneFont, String displayFormat) {
       }
       int currentYear = ptm->tm_year+1900;
 
-        if (displayFormat == "ddmmyyyy")
-          t = monthDayStr + "." + currentMonthStr + "." + String(currentYear);
-      if (displayFormat == "ddmm") t = monthDayStr + "." + currentMonthStr;
+      if (displayFormat == "ddmmyyyy")
+        t = monthDayStr + "." + currentMonthStr + "." + String(currentYear);
+      if (displayFormat == "ddmm") t = monthDayStr + "." + currentMonthStr + ".";
       if (displayFormat == "ddmmaa") t = monthDayStr + "." + currentMonthStr + String(weekDay);
       if (displayFormat == "aa") t = String(weekDay);
+
+      for (int i = 0; i < 10; i++) {
+        String alarm = alarms[i];
+        if (strcmp(alarm.c_str(), t.c_str()) == 0) {
+          t = "ALARM";
+        }
+      }
 
       return t;
 }
@@ -904,6 +906,29 @@ String haApiGet(String sensorId, String sensorPostfix) {
   return "err";
 }
 
+
+bool nightMode = false;
+
+void toggleNightMode() {
+  if (nightMode == false) {
+    P.displayClear();
+    P.setFont(0, wledSymbolFont);
+    P.setTextEffect(0, stringToTextEffectT(zones[0].scrollEffectIn), PA_NO_EFFECT);
+    zoneNewMessage(0, "M", "");
+    delay(2000);
+    nightMode = true;
+    P.displayClear();
+    delay(1000);
+    P.displayShutdown(true);
+  }
+  else
+  {
+    newConfigAvailable = true;
+    nightMode = false;
+    P.displayShutdown(false);
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println("Start serial....");
@@ -934,8 +959,18 @@ void setup() {
     request->send_P(200, "text/html", PAGE_settings, processor);
   });
 
-  //// route POST request for config, store data to config file
-  server.on("/configpost", HTTP_POST, [](AsyncWebServerRequest *request) {
+  server.on("/night", HTTP_GET, [](AsyncWebServerRequest *request) { 
+    toggleNightMode();
+    request->send_P(200, "text/text", "ok", processor); 
+  });
+
+  server.on("/device-check", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send_P(200, "text/text", "ok", processor);
+  });
+
+      //// route POST request for config, store data to config file
+      server.on("/configpost", HTTP_POST, [](AsyncWebServerRequest *request)
+                {
       int params = request->params();
       Serial.printf("%d params sent in\n", params);
       for(int i=0;i<params;i++){
@@ -1014,8 +1049,7 @@ void setup() {
           if (strcmp(p->name().c_str(), "messageZone2") == 0) zoneNewMessage(2, p->value().c_str(), "");
         }
       }
-      request->send(200, "application/json", "{\"status\":\"success\"}");
-    });
+      request->send(200, "application/json", "{\"status\":\"success\"}"); });
 
   ConfigFile_Read_Variable();
 
